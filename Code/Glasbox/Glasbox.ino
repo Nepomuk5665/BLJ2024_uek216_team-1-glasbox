@@ -37,6 +37,9 @@ PubSubClient mqtt_client(wifi_client);
 Adafruit_AHTX0 temp_sensor;
 Adafruit_SSD1306 screen(128, 64, &Wire, -1);
 
+// Buzzer Pin
+const int buzzerPin = 25;
+
 // connect to wifi
 void connect_wifi() {
     Serial.println("Trying to connect to wifi...");
@@ -114,6 +117,8 @@ void connect_mqtt() {
         }
     }
 }
+// note for Red light
+#define NOTE_A5  880
 
 // update the leds based on temperature and humidity
 void update_leds(float temperature, float humidity) {
@@ -137,6 +142,7 @@ void update_leds(float temperature, float humidity) {
     // if both are bad, red light
     if(!temp_is_good && !humidity_is_good) {
         digitalWrite(red_led, HIGH);
+        tone(buzzerPin, NOTE_A5, 4);
     }
     
     // if one is bad, yellow light
