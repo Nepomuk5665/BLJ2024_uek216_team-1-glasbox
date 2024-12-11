@@ -5,151 +5,238 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-const char* device_id = "DEFINE_DEVICE_ID_HERE";
-const char* ssid = "GuestWLANPortal";
-const char* mqtt_server = "10.10.2.127";
-const char* topic1 = "zuerich/glasbox/oliv/temp";
-const char* topic2 = "zuerich/glasbox/oliv/humidity";
-const int RED_LED_PIN = 27;
-const int YELLOW_LED_PIN = 14;
-const int GREEN_LED_PIN = 13;
+// wifi stuff
+String myDeviceId = "DEFINE_DEVICE_ID_HERE";
+String wifi_name = "GuestWLANPortal";
+String mqtt_ip = "10.10.2.127";
 
+// where to send temperature
+String temp_topic = "zuerich/glasbox/oliv/temp";
+String humidity_topic = "zuerich/glasbox/oliv/humidity";
 
-const unsigned long WIFI_TIMEOUT = 10000; 
-const unsigned long MQTT_RETRY_INTERVAL = 5000; 
-unsigned long lastMqttRetry = 0;
+// settings topics
+String temp_max_topic = "zuerich/glasbox/oliv/settings/tempMax";
+String temp_min_topic = "zuerich/glasbox/oliv/settings/tempMin";
+String humidity_max_topic = "zuerich/glasbox/oliv/settings/humidityMax";
+String humidity_min_topic = "zuerich/glasbox/oliv/settings/humidityMin";
 
-WiFiClient espClient;
-PubSubClient client(espClient);
-Adafruit_AHTX0 aht;
-Adafruit_SSD1306 display(128, 64, &Wire, -1);
+// led pins
+int red_led = 27;
+int yellow_led = 14;
+int green_led = 13;
 
-bool setup_wifi() {
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
+// temperature limits
+float min_temp = 27.0;
+float max_temp = 50.0;
+float min_humidity = 23.0;
+float max_humidity = 50.0;
+
+// make all the objects we need
+WiFiClient wifi_client;
+PubSubClient mqtt_client(wifi_client);
+Adafruit_AHTX0 temp_sensor;
+Adafruit_SSD1306 screen(128, 64, &Wire, -1);
+
+// connect to wifi
+void connect_wifi() {
+    Serial.println("Trying to connect to wifi...");
+    WiFi.disconnect();
+    delay(100);
     
-    unsigned long startAttemptTime = millis();
-    WiFi.begin(ssid);
+    WiFi.begin(wifi_name.c_str());
     
-    while (WiFi.status() != WL_CONNECTED && 
-           millis() - startAttemptTime < WIFI_TIMEOUT) {
+    // wait until connected
+    while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
     }
     
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("done!");
-        return true;
-    } else {
-        Serial.println("failed!");
-        return false;
+    Serial.println("Connected to wifi!");
+    Serial.print("IP address is: ");
+    Serial.println(WiFi.localIP());
+}
+
+// handle messages from mqtt
+void got_mqtt_message(char* topic, byte* message, unsigned int length) {
+    
+    String msg = "";
+    for(int i = 0; i < length; i++) {
+        msg += (char)message[i];
+    }
+    
+    float number = msg.toFloat();
+    
+    
+    if(String(topic) == temp_max_topic) {
+        max_temp = number;
+        Serial.print("Changed max temp to: ");
+        Serial.println(max_temp);
+    }
+    
+    if(String(topic) == temp_min_topic) {
+        min_temp = number;
+        Serial.print("Changed min temp to: ");
+        Serial.println(min_temp);
+    }
+    
+    if(String(topic) == humidity_max_topic) {
+        max_humidity = number;
+        Serial.print("Changed max humidity to: ");
+        Serial.println(max_humidity);
+    }
+    
+    if(String(topic) == humidity_min_topic) {
+        min_humidity = number;
+        Serial.print("Changed min humidity to: ");
+        Serial.println(min_humidity);
     }
 }
 
-bool tryConnect() {
-    if (client.connect(device_id)) {
-        Serial.println("MQTT connected!");
-        client.subscribe(topic1);
-        client.subscribe(topic2);
-        return true;
-    }
-    return false;
-}
-
-void manageMQTTConnection() {
-    if (!client.connected() && 
-        (millis() - lastMqttRetry >= MQTT_RETRY_INTERVAL)) {
+// try to connect to mqtt
+void connect_mqtt() {
+    while (!mqtt_client.connected()) {
+        Serial.println("Trying to connect to MQTT...");
         
-        Serial.print("Attempting MQTT connection...");
         
-        if (tryConnect()) {
-            lastMqttRetry = 0;  
+        String clientId = myDeviceId + String(random(1000));
+        
+        if (mqtt_client.connect(clientId.c_str())) {
+            Serial.println("Connected to MQTT!");
+            
+            // subscribe to all settings
+            mqtt_client.subscribe(temp_max_topic.c_str());
+            mqtt_client.subscribe(temp_min_topic.c_str());
+            mqtt_client.subscribe(humidity_max_topic.c_str());
+            mqtt_client.subscribe(humidity_min_topic.c_str());
         } else {
-            lastMqttRetry = millis();  
-            Serial.println("failed, will retry later");
+            Serial.println("Failed to connect to MQTT :(");
+            delay(5000);
         }
     }
 }
 
-void callback(char* topic, byte* payload, unsigned int length) {
-    if (strcmp(topic, topic2) == 0) {
-        char message[length + 1];
-        memcpy(message, payload, length);
-        message[length] = '\0';
-        Serial.print("Received Message: ");
-        Serial.println(message);
+// update the leds based on temperature and humidity
+void update_leds(float temperature, float humidity) {
+    // check if temperature is good
+    bool temp_is_good = false;
+    if(temperature >= min_temp && temperature <= max_temp) {
+        temp_is_good = true;
+    }
+    
+    // check if humidity is good
+    bool humidity_is_good = false;
+    if(humidity >= min_humidity && humidity <= max_humidity) {
+        humidity_is_good = true;
+    }
+    
+    // turn all leds off first
+    digitalWrite(red_led, LOW);
+    digitalWrite(yellow_led, LOW);
+    digitalWrite(green_led, LOW);
+    
+    // if both are bad, red light
+    if(!temp_is_good && !humidity_is_good) {
+        digitalWrite(red_led, HIGH);
+    }
+    
+    // if one is bad, yellow light
+    if((temp_is_good && !humidity_is_good) || (!temp_is_good && humidity_is_good)) {
+        digitalWrite(yellow_led, HIGH);
+    }
+    
+    // if both good, green light
+    if(temp_is_good && humidity_is_good) {
+        digitalWrite(green_led, HIGH);
     }
 }
 
 void setup() {
+    // start serial so we can debug
     Serial.begin(115200);
-    Serial.println("AHT10 + SSD1306 Demo");
-
-    pinMode(RED_LED_PIN, OUTPUT);
-    pinMode(YELLOW_LED_PIN, OUTPUT);
-    pinMode(GREEN_LED_PIN, OUTPUT);
+    Serial.println("Starting...");
     
-    digitalWrite(RED_LED_PIN, LOW);
-    digitalWrite(YELLOW_LED_PIN, LOW);
-    digitalWrite(GREEN_LED_PIN, LOW);
-
-    if (!aht.begin()) {
-        Serial.println("AHT10 allocation failed");
+    // setup wifi
+    WiFi.mode(WIFI_STA);
+    Wire.setClock(400000);
+    
+    // setup led pins
+    pinMode(red_led, OUTPUT);
+    pinMode(yellow_led, OUTPUT);
+    pinMode(green_led, OUTPUT);
+    
+    // turn off all leds
+    digitalWrite(red_led, LOW);
+    digitalWrite(yellow_led, LOW);
+    digitalWrite(green_led, LOW);
+    
+    // start temperature sensor
+    if (!temp_sensor.begin()) {
+        Serial.println("Couldn't start temperature sensor!");
         while (1) delay(10);
     }
-
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-        Serial.println("SSD1306 allocation failed");
-        while (1) delay(1);
+    
+    // start screen
+    if (!screen.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println("Couldn't start screen!");
+        while (1) delay(10);
     }
-
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setTextColor(WHITE);
-    Serial.println("Setup complete");
-
-    if (!setup_wifi()) {
-        // wlan problem
-        return;
-    }
-
-    client.setServer(mqtt_server, 1883);
-    client.setCallback(callback);
+    
+    // setup screen
+    screen.clearDisplay();
+    screen.setTextSize(2);
+    screen.setTextColor(WHITE);
+    
+    // connect to wifi
+    connect_wifi();
+    
+    // setup mqtt
+    mqtt_client.setServer(mqtt_ip.c_str(), 1883);
+    mqtt_client.setCallback(got_mqtt_message);
+    mqtt_client.setBufferSize(256);
+    mqtt_client.setSocketTimeout(10);
 }
 
 void loop() {
-    
-    manageMQTTConnection();
-    
-    if (client.connected()) {
-        sensors_event_t humidity, temp;
-        aht.getEvent(&humidity, &temp);
-
-        
-        display.clearDisplay();
-        display.setCursor(0, 0);
-        display.print(temp.temperature);
-        display.println(" degC");
-        display.println("----------");
-        display.print(humidity.relative_humidity);
-        display.println("% rH");
-        display.display();
-
-        
-        char tempBuffer[10];
-        sprintf(tempBuffer, "%.2f", temp.temperature);
-        client.publish(topic1, tempBuffer);
-
-        char humidityBuffer[10];
-        sprintf(humidityBuffer, "%.2f", humidity.relative_humidity);
-        client.publish(topic2, humidityBuffer);
-
-        client.loop();
+    // check wifi
+    if(WiFi.status() != WL_CONNECTED) {
+        connect_wifi();
     }
     
+    // check mqtt
+    if(!mqtt_client.connected()) {
+        connect_mqtt();
+    }
     
-    digitalWrite(RED_LED_PIN, HIGH);
-    delay(500);
-    digitalWrite(RED_LED_PIN, LOW);
-    delay(1500); 
+    // let mqtt do its thing
+    mqtt_client.loop();
+    
+    // get temperature and humidity
+    sensors_event_t humidity_reading, temp_reading;
+    temp_sensor.getEvent(&humidity_reading, &temp_reading);
+    
+    float current_temp = temp_reading.temperature;
+    float current_humidity = humidity_reading.relative_humidity;
+    
+    // update the leds
+    update_leds(current_temp, current_humidity);
+    
+    // update the screen
+    screen.clearDisplay();
+    screen.setCursor(0, 0);
+    screen.print(current_temp);
+    screen.println(" C");
+    screen.println("--------");
+    screen.print(current_humidity);
+    screen.println("% rH");
+    screen.display();
+    
+    // send to mqtt
+    String temp_string = String(current_temp, 2);
+    String humidity_string = String(current_humidity, 2);
+    
+    mqtt_client.publish(temp_topic.c_str(), temp_string.c_str());
+    mqtt_client.publish(humidity_topic.c_str(), humidity_string.c_str());
+    
+    // wait a bit
+    delay(200);
 }
