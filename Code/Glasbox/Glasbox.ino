@@ -9,8 +9,8 @@ const char* device_id = "DEFINE_DEVICE_ID_HERE";
 const char* ssid = "GuestWLANPortal";
 const char* mqtt_server = "10.10.2.127";
 
-const char* topic1 = "topic";
-const char* topic2 = "topic";
+const char* topic1 = "zuerich/glasbox/oliv/temp";
+const char* topic2 = "zuerich/glasbox/oliv/humidity";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -88,11 +88,9 @@ void loop() {
   }
   sensors_event_t humidity, temp;
   aht.getEvent(&humidity, &temp);
-  char tempBuffer[10];
-  sprintf(tempBuffer, "%f", temp.temperature);
-  client.publish(topic1, tempBuffer);
 
-  
+
+
 
   sensors_event_t humidity, temp;
   aht.getEvent(&humidity, &temp);
@@ -106,18 +104,16 @@ void loop() {
   display.display();
 
 
+  char tempBuffer[10];
+  sprintf(tempBuffer, "%f", temp.temperature);
+  client.publish(topic1, tempBuffer);
 
-  
+
+  char tempBuffer[10];
+  sprintf(tempBuffer, "%f", humidity.relative_humidity);
+  client.publish(topic2, tempBuffer);
+
+
   delay(500);
   client.loop();
 }
-
-
-
-
-
-
-
-
-
-
