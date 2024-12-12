@@ -26,7 +26,7 @@ int red_led = 27;
 int yellow_led = 14;
 int green_led = 13;
 
-// temperature limits
+// temperature limits defult
 float min_temp = 27.0;
 float max_temp = 50.0;
 float min_humidity = 23.0;
