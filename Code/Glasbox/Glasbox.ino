@@ -27,8 +27,8 @@ int yellow_led = 14;
 int green_led = 13;
 
 // temperature limits defult
-float min_temp = 27.0;
-float max_temp = 50.0;
+float min_temp = 21.0;
+float max_temp = 27.0;
 float min_humidity = 23.0;
 float max_humidity = 50.0;
 
@@ -253,3 +253,8 @@ void loop() {
   // wait a bit
   delay(200);
 }
+
+// Quellen: Offiziellen Kursunterlagen, https://www.hivemq.com/blog/mqtt-essentials-part-4-mqtt-publish-subscribe-unsubscribe/ und https://esp32io.com/tutorials/esp32-piezo-buzzer#google_vignette
+
+
+
